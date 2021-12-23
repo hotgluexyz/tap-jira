@@ -15,8 +15,8 @@ REQUIRED_CONFIG_KEYS_CLOUD = ["start_date",
                               "cloud_id",
                               "access_token",
                               "refresh_token",
-                              "oauth_client_id",
-                              "oauth_client_secret"]
+                              "client_id",
+                              "client_secret"]
 REQUIRED_CONFIG_KEYS_HOSTED = ["start_date",
                                "username",
                                "password",

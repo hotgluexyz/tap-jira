@@ -143,7 +143,7 @@ def check_status(response):
 
 class Client():
     def __init__(self, config):
-        self.is_cloud = 'oauth_client_id' in config.keys()
+        self.is_cloud = 'client_id' in config.keys()
         self.session = requests.Session()
         self.next_request_at = datetime.now()
         self.user_agent = config.get("user_agent")
@@ -156,8 +156,8 @@ class Client():
             self.cloud_id = config.get('cloud_id')
             self.access_token = config.get('access_token')
             self.refresh_token = config.get('refresh_token')
-            self.oauth_client_id = config.get('oauth_client_id')
-            self.oauth_client_secret = config.get('oauth_client_secret')
+            self.oauth_client_id = config.get('client_id')
+            self.oauth_client_secret = config.get('client_secret')
 
             # Only appears to be needed once for any 6 hour period. If
             # running the tap for more than 6 hours is needed this will

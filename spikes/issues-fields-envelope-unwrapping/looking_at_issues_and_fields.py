@@ -24,8 +24,8 @@ class Client():
         self.cloud_id = config['cloud_id']
         self.access_token = config['access_token']
         self.refresh_token = config['refresh_token']
-        self.oauth_client_id = config['oauth_client_id']
-        self.oauth_client_secret = config['oauth_client_secret']
+        self.oauth_client_id = config['client_id']
+        self.oauth_client_secret = config['client_secret']
         self.session = requests.Session()
         self.next_request_at = datetime.now()
         self.login_timer = None

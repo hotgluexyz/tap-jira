@@ -48,9 +48,9 @@ This tap:
 
    ```json
    {
-     "oauth_client_secret": "<oauth-client-secret>",
+     "client_secret": "<oauth-client-secret>",
      "user_agent": "<user-agent>",
-     "oauth_client_id": "<oauth-client-id>",
+     "client_id": "<oauth-client-id>",
      "access_token": "<access-token>",
      "cloud_id": "<cloud-id>",
      "refresh_token": "<refresh-token>",
