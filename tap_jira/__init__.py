@@ -5,14 +5,14 @@ import singer
 from singer import utils
 from singer import metadata
 from singer.catalog import Catalog, CatalogEntry, Schema
-from . import streams as streams_
-from .context import Context
-from .http import Client
+from tap_jira import streams as streams_
+from tap_jira.context import Context
+from tap_jira.http import Client
 
 LOGGER = singer.get_logger()
 REQUIRED_CONFIG_KEYS_CLOUD = ["start_date",
                               "user_agent",
-                              "cloud_id",
+                              "site_name",
                               "access_token",
                               "refresh_token",
                               "client_id",

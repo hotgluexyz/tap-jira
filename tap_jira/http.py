@@ -153,11 +153,12 @@ class Client():
             LOGGER.info("Using OAuth based API authentication")
             self.auth = None
             self.base_url = 'https://api.atlassian.com/ex/jira/{}{}'
-            self.cloud_id = config.get('cloud_id')
             self.access_token = config.get('access_token')
             self.refresh_token = config.get('refresh_token')
             self.oauth_client_id = config.get('client_id')
             self.oauth_client_secret = config.get('client_secret')
+            self.site_name = config.get('site_name')
+            self.cloud_id = self._get_cloud_id()
 
             # Only appears to be needed once for any 6 hour period. If
             # running the tap for more than 6 hours is needed this will
@@ -227,6 +228,20 @@ class Client():
             timer.tags[metrics.Tag.http_status_code] = response.status_code
         check_status(response)
         return response.json()
+    
+    def _get_cloud_id(self):
+
+        url = "https://api.atlassian.com/oauth/token/accessible-resources"
+        headers = {
+            'Authorization': f'Bearer {self.access_token}',
+            'Accept': 'application/json'
+            }
+        response = requests.request("GET", url, headers=headers)
+        try:
+            cloud_id = next(d["id"] for d in response.json() if d["name"]==self.site_name)
+        except StopIteration:
+            raise("Invalid ot not authorized site_name")
+        return cloud_id
 
     def refresh_credentials(self):
         body = {"grant_type": "refresh_token",
