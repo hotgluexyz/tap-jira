@@ -14,11 +14,13 @@ class Context():
     def get_catalog_entry(cls, stream_name):
         if not cls.stream_map:
             cls.stream_map = {s.tap_stream_id: s for s in cls.catalog.streams}
-        return cls.stream_map[stream_name]
+        return cls.stream_map.get(stream_name)
 
     @classmethod
     def is_selected(cls, stream_name):
         stream = cls.get_catalog_entry(stream_name)
+        if stream is None:
+            return False
         stream_metadata = metadata.to_map(stream.metadata)
         return metadata.get(stream_metadata, (), 'selected')
 
