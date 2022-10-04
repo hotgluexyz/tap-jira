@@ -8,6 +8,7 @@ import requests
 from singer import metrics
 import singer
 import backoff
+import json
 
 # Jira OAuth tokens last for 3600 seconds. We set it to 3500 to try to
 # come in under the limit.
@@ -142,7 +143,7 @@ def check_status(response):
         raise exc(message, response) from None
 
 class Client():
-    def __init__(self, config):
+    def __init__(self, config, config_path):
         self.is_cloud = 'client_id' in config.keys()
         self.session = requests.Session()
         self.next_request_at = datetime.now()
@@ -153,6 +154,7 @@ class Client():
             LOGGER.info("Using OAuth based API authentication")
             self.auth = None
             self.base_url = 'https://api.atlassian.com/ex/jira/{}{}'
+            self.config_path = config_path
             self.access_token = config.get('access_token')
             self.refresh_token = config.get('refresh_token')
             self.oauth_client_id = config.get('client_id')
@@ -248,15 +250,22 @@ class Client():
                 "client_secret": self.oauth_client_secret,
                 "refresh_token": self.refresh_token}
         try:
+            with open(self.config_path, 'r') as f:
+                creds = json.load(f)
             resp = self.session.post("https://auth.atlassian.com/oauth/token", data=body)
             resp.raise_for_status()
-            self.access_token = resp.json()['access_token']
+            resp_json = resp.json()
+            self.access_token = resp_json['access_token']
+            creds.update(resp_json)
+            with open(self.config_path, 'w') as f:
+                json.dump(creds, f, indent=4)
         except Exception as ex:
             error_message = str(ex)
             if resp:
                 error_message = error_message + ", Response from Jira: {}".format(resp.text)
             raise Exception(error_message) from ex
         finally:
+            resp.raise_for_status()
             LOGGER.info("Starting new login timer")
             self.login_timer = threading.Timer(REFRESH_TOKEN_EXPIRATION_PERIOD,
                                                self.refresh_credentials)

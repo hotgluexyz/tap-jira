@@ -113,10 +113,11 @@ def main():
     catalog = Catalog.from_dict(args.properties) \
         if args.properties else discover()
     Context.config = args.config
+    Context.config_path = args.config_path
     Context.state = args.state
     Context.catalog = catalog
 
-    Context.client = Client(Context.config)
+    Context.client = Client(Context.config, Context.config_path)
 
     try:
         if args.discover:
