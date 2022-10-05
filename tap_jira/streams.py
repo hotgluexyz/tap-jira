@@ -150,33 +150,6 @@ class ProjectTypes(Stream):
         self.write_page(types)
 
 
-class Users(Stream):
-    def sync(self):
-        max_results = 2
-
-        if Context.config.get("groups"):
-            groups = Context.config.get("groups").split(",")
-        else:
-            groups = ["jira-administrators",
-                      "jira-software-users",
-                      "jira-core-users",
-                      "jira-users",
-                      "users"]
-
-        for group in groups:
-            try:
-                params = {"groupname": group,
-                          "maxResults": max_results,
-                          "includeInactiveUsers": True}
-                pager = Paginator(Context.client, items_key='values')
-                for page in pager.pages(self.tap_stream_id, "GET",
-                                        "/rest/api/2/group/member",
-                                        params=params):
-                    self.write_page(page)
-            except JiraNotFoundError:
-                LOGGER.info("Could not find group \"%s\", skipping", group)
-
-
 class Issues(Stream):
 
     def sync(self):
@@ -285,7 +258,7 @@ ALL_STREAMS = [
     Stream("project_categories", ["id"], path="/rest/api/2/projectCategory"),
     Stream("resolutions", ["id"], path="/rest/api/2/resolution"),
     Stream("roles", ["id"], path="/rest/api/2/role"),
-    Users("users", ["accountId"]),
+    Stream("users", ["id"], path="/rest/api/2/users/search"),
     ISSUES,
     ISSUE_COMMENTS,
     CHANGELOGS,

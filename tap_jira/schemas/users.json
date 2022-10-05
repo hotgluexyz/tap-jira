@@ -30,6 +30,12 @@
         "string"
       ]
     },
+    "locale": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
     "emailAddress": {
       "type": [
         "null",
