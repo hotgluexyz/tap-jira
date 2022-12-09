@@ -245,6 +245,7 @@ class Client():
         return cloud_id
 
     def refresh_credentials(self):
+        LOGGER.info(f"Refresh Credentials.")
         body = {"grant_type": "refresh_token",
                 "client_id": self.oauth_client_id,
                 "client_secret": self.oauth_client_secret,
@@ -253,9 +254,11 @@ class Client():
             with open(self.config_path, 'r') as f:
                 creds = json.load(f)
             resp = self.session.post("https://auth.atlassian.com/oauth/token", data=body)
+            LOGGER.info(f"REFRESH RESPONSE: {resp.text}")
             resp.raise_for_status()
             resp_json = resp.json()
             self.access_token = resp_json['access_token']
+            self.refresh_token = resp_json['refresh_token']
             creds.update(resp_json)
             with open(self.config_path, 'w') as f:
                 json.dump(creds, f, indent=4)
