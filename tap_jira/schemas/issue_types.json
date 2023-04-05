@@ -1,0 +1,30 @@
+{
+  "title": "IssueType",
+  "type": ["null", "object"],
+  "properties": {
+    "self": {
+      "type": ["null", "string"]
+    },
+    "id": {
+      "type": ["null", "string"]
+    },
+    "description": {
+      "type": ["null", "string"]
+    },
+    "iconUrl": {
+      "type": ["null", "string"]
+    },
+    "name": {
+      "type": ["null", "string"]
+    },
+    "subtask": {
+      "type": ["null", "boolean"]
+    },
+    "avatarId": {
+      "type": ["null", "integer"]
+    },
+    "hierarchyLevel": {
+      "type": ["null", "integer"]
+    }
+  }
+}
