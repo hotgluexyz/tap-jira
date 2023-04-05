@@ -1,0 +1,103 @@
+{
+    "title": "Statuses",
+    "type": [
+      "null",
+      "object"
+    ],
+    "properties": {
+      "id": {
+        "type": [
+          "null",
+          "string"
+        ]
+      },
+      "name": {
+        "type": [
+          "null",
+          "string"
+        ]
+      },
+      "statusCategory": {
+        "type": [
+          "null",
+          "string"
+        ]
+      },
+      "scope": {
+        "title": "Scope",
+        "type": [
+          "null",
+          "object"
+        ],
+        "properties": {
+          "type": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "project": {
+            "type": [
+              "null",
+              "object"
+            ],
+            "properties": {
+              "id": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "description": {
+        "type": [
+          "null",
+          "string"
+        ]
+      },
+      "usages": {
+        "type": [
+          "null",
+          "array"
+        ],
+        "items": {
+          "type": [
+            "null",
+            "object"
+          ],
+          "properties": {
+            "project": {
+              "type": [
+                "null",
+                "object"
+              ],
+              "properties": {
+                "id": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                }
+              }
+            },
+            "issueTypes": {
+              "type": [
+                "null",
+                "array"
+              ],
+              "items": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  

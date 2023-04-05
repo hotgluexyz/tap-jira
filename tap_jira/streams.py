@@ -118,7 +118,7 @@ class Projects(Stream):
     def sync(self):
         projects = Context.client.request(
             self.tap_stream_id, "GET", "/rest/api/2/project",
-            params={"expand": "description,lead,url,projectKeys"})
+            params={"expand": "description,lead,url,projectKeys,issueTypes"})
         for project in projects:
             # The Jira documentation suggests that a "versions" key may appear
             # in the project, but from my testing that hasn't been the case
@@ -148,6 +148,20 @@ class ProjectTypes(Stream):
         for type_ in types:
             type_.pop("icon")
         self.write_page(types)
+
+class IssuePriorities(Stream):
+    def sync(self):
+        path="/rest/api/2/priority/search"
+        response = Context.client.request(self.tap_stream_id, "GET", path)
+        priorities = response["values"]
+        self.write_page(priorities)
+
+class Statuses(Stream):
+    def sync(self):
+        path="/rest/api/2/statuses/search"
+        response = Context.client.request(self.tap_stream_id, "GET", path)
+        priorities = response["values"]
+        self.write_page(priorities)
 
 
 class Issues(Stream):
@@ -256,9 +270,12 @@ ALL_STREAMS = [
     COMPONENTS,
     ProjectTypes("project_types", ["key"]),
     Stream("project_categories", ["id"], path="/rest/api/2/projectCategory"),
+    Stream("issue_types", ["id"], path="/rest/api/2/issuetype"),
     Stream("resolutions", ["id"], path="/rest/api/2/resolution"),
     Stream("roles", ["id"], path="/rest/api/2/role"),
     Stream("users", ["id"], path="/rest/api/2/users/search"),
+    Statuses("statuses", ["id"]),
+    IssuePriorities("issue_priorities", ["id"]),
     ISSUES,
     ISSUE_COMMENTS,
     CHANGELOGS,

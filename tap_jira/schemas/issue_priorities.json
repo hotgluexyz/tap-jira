@@ -1,0 +1,52 @@
+{
+    "title": "Issue Priority",
+    "type": [
+      "null",
+      "object"
+    ],
+    "properties": {
+      "self": {
+        "type": [
+          "null",
+          "string"
+        ]
+      },
+      "statusColor": {
+        "type": [
+          "null",
+          "string"
+        ]
+      },
+      "description": {
+        "type": [
+          "null",
+          "string"
+        ]
+      },
+      "iconUrl": {
+        "type": [
+          "null",
+          "string"
+        ]
+      },
+      "name": {
+        "type": [
+          "null",
+          "string"
+        ]
+      },
+      "id": {
+        "type": [
+          "null",
+          "string"
+        ]
+      },
+      "isDefault": {
+        "type": [
+          "null",
+          "boolean"
+        ]
+      }
+    }
+  }
+  
