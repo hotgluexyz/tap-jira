@@ -273,7 +273,7 @@ ALL_STREAMS = [
     Stream("issue_types", ["id"], path="/rest/api/2/issuetype"),
     Stream("resolutions", ["id"], path="/rest/api/2/resolution"),
     Stream("roles", ["id"], path="/rest/api/2/role"),
-    Stream("users", ["id"], path="/rest/api/2/users/search"),
+    Stream("users", ["accountId"], path="/rest/api/2/users/search"),
     Statuses("statuses", ["id"]),
     IssuePriorities("issue_priorities", ["id"]),
     ISSUES,
