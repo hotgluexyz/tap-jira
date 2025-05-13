@@ -241,7 +241,7 @@ class Client():
         response.raise_for_status()
         cloud_id = next((d["id"] for d in response.json() if d["name"]==self.site_name), None)
         if not cloud_id:
-            raise("Invalid ot not authorized site_name")
+            raise JiraForbiddenError(f"Invalid or not authorized site_name ({self.site_name}): {response.text}")
         return cloud_id
 
     def refresh_credentials(self):

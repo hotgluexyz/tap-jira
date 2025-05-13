@@ -8,6 +8,7 @@ from singer.catalog import Catalog, CatalogEntry, Schema
 from tap_jira import streams as streams_
 from tap_jira.context import Context
 from tap_jira.http import Client
+import threading
 
 LOGGER = singer.get_logger()
 REQUIRED_CONFIG_KEYS_CLOUD = ["start_date",
@@ -107,27 +108,33 @@ def sync():
 
 @singer.utils.handle_top_exception(LOGGER)
 def main():
-    args = get_args()
-
-    # Setup Context
-    catalog = Catalog.from_dict(args.properties) \
-        if args.properties else discover()
-    Context.config = args.config
-    Context.config_path = args.config_path
-    Context.state = args.state
-    Context.catalog = catalog
-
-    Context.client = Client(Context.config, Context.config_path)
-
     try:
+        args = get_args()
+        # Setup Context
+        catalog = Catalog.from_dict(args.properties) \
+            if args.properties else discover()
+        Context.config = args.config
+        Context.config_path = args.config_path
+        Context.state = args.state
+        Context.catalog = catalog
+
+        Context.client = Client(Context.config, Context.config_path)
+
         if args.discover:
             discover().dump()
             print()
         else:
             sync()
     finally:
+        LOGGER.info("Cancelling login timer")
         if Context.client and Context.client.login_timer:
             Context.client.login_timer.cancel()
+
+        # cancel all timer threads
+        for thread in threading.enumerate():
+            if isinstance(thread, threading.Timer) and thread.is_alive():
+                thread.cancel()
+                LOGGER.info(f"additional login timer canceled")
 
 
 if __name__ == "__main__":
