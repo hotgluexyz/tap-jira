@@ -17,22 +17,56 @@ plugins:
     - stream-maps
     - structured-logging
 
-    # TODO: Declare settings and their types here:
     settings:
     - name: client_id
       label: Client ID
-      description: OAuth client ID for the Jira OAuth app
+      description: OAuth client ID. A non-empty value selects OAuth over Basic Auth.
       sensitive: true
 
     - name: client_secret
-      label: Password
+      label: Client Secret
       description: OAuth client secret for the Jira OAuth app
       sensitive: true
 
     - name: refresh_token
       label: Refresh Token
-      description: OAuth refresh token for the Jira OAuth app
+      description: OAuth refresh token. Rotated by Atlassian on every refresh.
       sensitive: true
+
+    - name: access_token
+      label: Access Token
+      description: OAuth access token, refreshed and written back by the tap
+      sensitive: true
+
+    - name: expires_in
+      kind: integer
+      label: Token Expiry
+      description: Absolute epoch expiry of the access token, written back by the tap
+
+    - name: site_name
+      label: Site Name
+      description: Jira site to sync. Defaults to the first site the token can access.
+
+    - name: cloud_id
+      label: Cloud ID
+      description: Cloud id of the Jira site, skipping the site lookup
+
+    - name: username
+      label: Username
+      description: Basic Auth username, used when no client_id is set
+
+    - name: password
+      label: Password
+      description: Basic Auth password or API token
+      sensitive: true
+
+    - name: base_url
+      label: Base URL
+      description: Basic Auth Jira URL, e.g. https://mycompany.atlassian.net
+
+    - name: user_agent
+      label: User Agent
+      description: Value sent as the User-Agent header
 
     - name: start_date
       kind: date_iso8601
@@ -43,13 +77,13 @@ plugins:
       label: API URL
       description: Base URL for the Jira API
 
-    # TODO: Declare required settings here:
+    # Either OAuth (client_id + client_secret) or Basic Auth (username + password + base_url).
     settings_group_validation:
     - [client_id, client_secret]
+    - [username, password, base_url]
 
-    # TODO: Declare default configuration values here:
     config:
-      start_date: 6 months ago
+      start_date: '2000-01-01T00:00:00Z'
       api_url: https://api.atlassian.com
 
   loaders:

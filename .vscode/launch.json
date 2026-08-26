@@ -1,31 +1,29 @@
 {
     // https://code.visualstudio.com/docs/editor/debugging
-    // Shell redirects (e.g. > catalog.json) are not applied here—args go straight to Python.
-    // After debug, redirect in the integrated terminal if you need files on disk.
+    // Args go straight to Python, so shell redirects do not work here.
+    // Inspect output in the debug console, or redirect in the integrated terminal.
     "version": "0.2.0",
     "configurations": [
         {
             "name": "tap-jira discover",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
-            "program": "../tap_jira/tap.py",
+            "module": "tap_jira.tap",
             "cwd": "${workspaceFolder}/.secrets",
             "args": [
                 "--config",
                 "config.json",
-                "--discover",
-                ">",
-                "catalog.json"
+                "--discover"
             ],
+            "justMyCode": false,
             "console": "integratedTerminal",
             "python": "${workspaceFolder}/.venv/bin/python3"
         },
         {
-            "name": "tap-jira get",
-            "type": "python",
+            "name": "tap-jira sync",
+            "type": "debugpy",
             "request": "launch",
-            "justMyCode": false,
-            "program": "../tap_jira/tap.py",
+            "module": "tap_jira.tap",
             "cwd": "${workspaceFolder}/.secrets",
             "args": [
                 "--config",
@@ -33,10 +31,24 @@
                 "--state",
                 "state.json",
                 "--catalog",
-                "selected-catalog.json",
-                ">",
-                "data.txt"
+                "catalog-selected.json"
             ],
+            "justMyCode": false,
+            "console": "integratedTerminal",
+            "python": "${workspaceFolder}/.venv/bin/python3"
+        },
+        {
+            "name": "tap-jira access-token",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "tap_jira.tap",
+            "cwd": "${workspaceFolder}/.secrets",
+            "args": [
+                "--config",
+                "config.json",
+                "--access-token"
+            ],
+            "justMyCode": false,
             "console": "integratedTerminal",
             "python": "${workspaceFolder}/.venv/bin/python3"
         }

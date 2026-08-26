@@ -23,9 +23,7 @@ class DependencyException(Exception):
 def validate_dependencies(tap) -> None:
     """Fail if a stream is selected without the stream that produces its data."""
     errs = []
-    msg_tmpl = (
-        "Unable to extract {0} data. To receive {0} data, you also need to select {1}."
-    )
+    msg_tmpl = "Unable to extract {0} data. To receive {0} data, you also need to select {1}."
 
     def selected(name: str) -> bool:
         stream = tap.streams.get(name)
@@ -100,9 +98,7 @@ class ProjectsStream(JiraStream):
     schema = load_schema("projects")
 
     @override
-    def get_url_params(
-        self, context: dict | None, next_page_token: Any | None
-    ) -> dict[str, Any]:
+    def get_url_params(self, context: dict | None, next_page_token: Any | None) -> dict[str, Any]:
         return {"expand": "description,lead,url,projectKeys,issueTypes"}
 
     @override
@@ -284,12 +280,10 @@ class IssuesStream(JiraStream):
         return utils.strptime_to_utc(bookmark or self.config["start_date"])
 
     @override
-    def get_url_params(
-        self, context: dict | None, next_page_token: Any | None
-    ) -> dict[str, Any]:
-        start_date = self.starting_updated.astimezone(
-            pytz.timezone(self.timezone)
-        ).strftime("%Y-%m-%d %H:%M")
+    def get_url_params(self, context: dict | None, next_page_token: Any | None) -> dict[str, Any]:
+        start_date = self.starting_updated.astimezone(pytz.timezone(self.timezone)).strftime(
+            "%Y-%m-%d %H:%M"
+        )
         params: dict[str, Any] = {
             "fields": "*all",
             "expand": "changelog,transitions",
@@ -301,9 +295,7 @@ class IssuesStream(JiraStream):
         return params
 
     @override
-    def get_next_page_token(
-        self, response: Any, previous_token: Any | None
-    ) -> Any | None:
+    def get_next_page_token(self, response: Any, previous_token: Any | None) -> Any | None:
         data = response.json()
         if data.get("isLast"):
             return None
@@ -344,9 +336,7 @@ class IssuesStream(JiraStream):
         self._emit_substream(
             "changelogs", (row.pop("changelog", None) or {}).get("histories") or [], row["id"]
         )
-        self._emit_substream(
-            "issue_transitions", row.pop("transitions", None) or [], row["id"]
-        )
+        self._emit_substream("issue_transitions", row.pop("transitions", None) or [], row["id"])
         fields.pop("worklog", None)
         fields.pop("operations", None)
         return row
@@ -403,11 +393,21 @@ class WorklogsStream(JiraStream):
                 break
 
             raise_if_bookmark_cannot_advance(worklogs)
-            new_last_updated = max(
-                utils.strptime_to_utc(w["updated"]) for w in worklogs
-            )
+            new_last_updated = max(utils.strptime_to_utc(w["updated"]) for w in worklogs)
 
             yield from worklogs
+
+            # `since` has <= semantics, so a bookmark that does not move forward
+            # re-requests an identical page forever. Reachable when /worklog/list
+            # returns fewer records than the id page (deleted worklogs are omitted)
+            # and they all share one `updated` value, which stays below the
+            # 1000-record threshold raise_if_bookmark_cannot_advance guards.
+            if new_last_updated <= last_updated:
+                self.logger.warning(
+                    f"Worklogs bookmark did not advance past {last_updated}; "
+                    "stopping to avoid re-requesting the same page."
+                )
+                break
 
             last_updated = new_last_updated
             if ids_page.get("lastPage"):

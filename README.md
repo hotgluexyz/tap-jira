@@ -7,16 +7,47 @@ A [Singer](https://www.singer.io/) tap that extracts data from **Jira**. It is b
 - **REST**-style HTTP streams (see `client.py` / `streams.py`).
 - **OAuth2** with access token support via Hotglue (`access_token_support` on the tap).
 
-- Configurable **`api_url`** and optional **`start_date`** (see [Configuration](#configuration)).
-- Incremental sync is scaffolded with placeholder **`id`** (primary key) and **`modified_at`** (replication key); replace with real fields per stream in `streams.py`.
+- **Basic Auth** for Jira Server / Data Center, selected automatically when no `client_id` is configured.
+- Configurable **`api_url`** and **`start_date`** (see [Configuration](#configuration)).
+- Incremental replication on `issues` and `worklogs`; all other streams are full-table.
 
 ### Streams
 
-| Stream | Endpoint / notes | Primary key | Replication key |
-| ------ | ---------------- | ----------- | ----------------- |
-| `project` | `GET` + `/project` (default path; TODO: confirm with API) | `id` (TODO) | `modified_at` (TODO) |
+| Stream | Endpoint | Primary key | Replication |
+| ------ | -------- | ----------- | ----------- |
+| `projects` | `GET /rest/api/2/project` | `id` | full table |
+| `versions` | `GET /rest/api/2/project/{project_id}/version` | `id` | full table (child of `projects`) |
+| `components` | `GET /rest/api/2/project/{project_id}/component` | `id` | full table (child of `projects`) |
+| `project_types` | `GET /rest/api/2/project/type` | `key` | full table |
+| `project_categories` | `GET /rest/api/2/projectCategory` | `id` | full table |
+| `issue_types` | `GET /rest/api/2/issuetype` | `id` | full table |
+| `resolutions` | `GET /rest/api/2/resolution` | `id` | full table |
+| `roles` | `GET /rest/api/2/role` | `id` | full table |
+| `users` | `GET /rest/api/2/users/search` | `accountId` | full table |
+| `statuses` | `GET /rest/api/2/statuses/search` | `id` | full table |
+| `issue_priorities` | `GET /rest/api/2/priority/search` | `id` | full table |
+| `issues` | `GET /rest/api/3/search/jql` | `id` | incremental on `fields.updated` |
+| `issue_comments` | embedded in `issues` | `id` | emitted with `issues` |
+| `changelogs` | embedded in `issues` | `id` | emitted with `issues` |
+| `issue_transitions` | embedded in `issues` | `id` | emitted with `issues` |
+| `worklogs` | `GET /rest/api/2/worklog/updated` + `POST /rest/api/2/worklog/list` | `id` | incremental on `updated` |
 
-TODO: Describe pagination, rate limits, and any stream-specific query parameters in this section.
+Schemas live in `tap_jira/schemas/` and are carried over unchanged from the pre-SDK tap.
+
+**Stream dependencies.** `versions` and `components` require `projects`; `issue_comments`, `changelogs`, and
+`issue_transitions` require `issues`. Selecting a dependent stream without its parent fails fast with a
+`DependencyException`.
+
+**Sub-streams cost no extra requests.** A single pass over `/rest/api/3/search/jql` (with
+`expand=changelog,transitions`) yields comments, changelogs, and transitions, which are emitted to their own
+streams rather than re-fetched per issue.
+
+**Pagination.** `versions` and `components` page with `startAt` / `maxResults`; `issues` pages with
+`nextPageToken`. Other list endpoints return a single response. Requests are throttled to one every 10ms.
+
+**OAuth scopes.** `roles`, `users`, `statuses`, and `issue_priorities` need `read:jira-user` and the granular
+status/priority scopes. When the token lacks a scope, that stream is skipped with a warning instead of
+failing the run.
 
 ## Requirements
 
@@ -49,27 +80,60 @@ tap-jira --help
 
 ## Configuration
 
-| Setting | Type | Required | Default | Description |
-| ------- | ---- | -------- | ------- | ----------- |
-| `start_date` | string (datetime) | no | `2000-01-01T00:00:00Z` | Earliest record date to sync. |
-| `api_url` | string | no | `https://api.atlassian.com` | Base URL for the API. |
-| `client_id` | string | yes | — | OAuth client ID. |
-| `client_secret` | string | yes | — | OAuth client secret. |
-| `refresh_token` | string | no | — | OAuth refresh token (if applicable). |
+The tap supports two authentication modes and picks one automatically: **OAuth** when `client_id` is set to a
+non-empty value, otherwise **Basic Auth**.
 
-Run `tap-jira --about` (or `tap-jira --about --format=markdown`) for the authoritative schema for your installed version.
+| Setting | Type | Sensitive | Required | Default | Description |
+| ------- | ---- | --------- | -------- | ------- | ----------- |
+| `start_date` | datetime | no | no | `2000-01-01T00:00:00Z` | Earliest record date to sync. |
+| `api_url` | string | no | no | `https://api.atlassian.com` | Atlassian API root. OAuth only. |
+| `user_agent` | string | no | no | — | Sent as the `User-Agent` header. |
+| **OAuth** | | | | | |
+| `client_id` | string | **yes** | for OAuth | — | Presence of a non-empty value selects OAuth. |
+| `client_secret` | string | **yes** | for OAuth | — | OAuth client secret. |
+| `refresh_token` | string | **yes** | for OAuth | — | Rotated by Atlassian and written back on each refresh. |
+| `access_token` | string | **yes** | no | — | Written back by the tap; refreshed automatically. |
+| `expires_in` | integer | no | no | — | Absolute epoch expiry, written back by the tap. |
+| `site_name` | string | no | no | first accessible site | Jira site to sync. |
+| `cloud_id` | string | no | no | resolved from `site_name` | Skips the site lookup when set. |
+| **Basic Auth** | | | | | |
+| `username` | string | no | for Basic Auth | — | Jira username or account email. |
+| `password` | string | **yes** | for Basic Auth | — | Password or API token. |
+| `base_url` | string | no | for Basic Auth | — | e.g. `https://mycompany.atlassian.net`. |
 
-### Example `config.json`
+Settings marked sensitive must never be committed. Keep them in `.secrets/config.json` (gitignored) or a
+secrets manager.
+
+Run `tap-jira --about` (or `--about --format=markdown`) for the authoritative schema for your installed version.
+
+### Example `config.json` — OAuth
 
 ```json
 {
   "start_date": "2000-01-01T00:00:00Z",
-  "api_url": "https://api.atlassian.com",
   "client_id": "YOUR_CLIENT_ID",
   "client_secret": "YOUR_CLIENT_SECRET",
-  "refresh_token": ""
+  "refresh_token": "YOUR_REFRESH_TOKEN"
 }
 ```
+
+### Example `config.json` — Basic Auth
+
+```json
+{
+  "start_date": "2000-01-01T00:00:00Z",
+  "username": "you@example.com",
+  "password": "YOUR_API_TOKEN",
+  "base_url": "https://mycompany.atlassian.net"
+}
+```
+
+### Hotglue access token endpoint
+
+For OAuth connectors the tap can fetch tokens from Hotglue instead of refreshing against Atlassian. Set
+`"_refresh_token_via_hg_api": true` in the config and provide the `TENANT`, `API_KEY`, `FLOW`, `ENV_ID`, and
+`TAP` environment variables. `tap-jira --config config.json --access-token` refreshes the token and writes it
+back to the config file.
 
 Do not commit real credentials. Prefer environment variables or a secrets manager in production.
 
@@ -107,7 +171,15 @@ tap-jira --about
 
 ## API / documentation
 
-TODO: Add your vendor’s base URLs, auth docs, and links (compare to the “API hosts” section in a finished tap README).
+| Host | Role |
+| ---- | ---- |
+| `https://auth.atlassian.com/oauth/token` | OAuth token endpoint (refresh) |
+| `https://api.atlassian.com/oauth/token/accessible-resources` | Site / cloud id lookup |
+| `https://api.atlassian.com/ex/jira/{cloudId}` | Jira REST API under OAuth |
+| `https://<your-site>` (`base_url`) | Jira REST API under Basic Auth |
+
+- [Jira Cloud REST API](https://developer.atlassian.com/cloud/jira/platform/rest/v3/)
+- [Atlassian OAuth 2.0 (3LO)](https://developer.atlassian.com/cloud/jira/platform/oauth-2-3lo-apps/)
 
 
 ## License

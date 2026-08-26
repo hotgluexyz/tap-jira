@@ -45,7 +45,7 @@ class JiraStream(RESTStream):
 
     @property
     def is_cloud(self) -> bool:
-        return "client_id" in self.config
+        return bool(self.config.get("client_id"))
 
     @override
     @cached_property
@@ -58,9 +58,7 @@ class JiraStream(RESTStream):
                     "Config must provide either `client_id` (OAuth) or "
                     "`username` and `password` (Basic Auth)."
                 )
-            return BasicAuthenticator.create_for_stream(
-                self, username=username, password=password
-            )
+            return BasicAuthenticator.create_for_stream(self, username=username, password=password)
 
         authenticator_cls, auth_endpoint = self._tap.access_token_support(self._tap)
         return authenticator_cls(
@@ -93,9 +91,7 @@ class JiraStream(RESTStream):
             resources = response.json()
             site_name = self.config.get("site_name")
             if site_name:
-                cloud_id = next(
-                    (r["id"] for r in resources if r.get("name") == site_name), None
-                )
+                cloud_id = next((r["id"] for r in resources if r.get("name") == site_name), None)
                 if not cloud_id:
                     names = [r.get("name") for r in resources]
                     raise InvalidCredentialsError(
@@ -108,9 +104,7 @@ class JiraStream(RESTStream):
                     "Set `site_name` or `cloud_id` in config to pin a specific site."
                 )
             else:
-                raise InvalidCredentialsError(
-                    "This token has no accessible Jira sites."
-                )
+                raise InvalidCredentialsError("This token has no accessible Jira sites.")
 
         self._tap._cloud_id = cloud_id
         return cloud_id
@@ -122,9 +116,7 @@ class JiraStream(RESTStream):
         if not self.is_cloud:
             base_url = self.config.get("base_url")
             if not base_url:
-                raise InvalidCredentialsError(
-                    "`base_url` is required when using Basic Auth."
-                )
+                raise InvalidCredentialsError("`base_url` is required when using Basic Auth.")
             # defend against a base_url that does or does not provide https://
             return "https://" + re.sub(r"^https?://", "", base_url).rstrip("/")
         return f"{self.api_url}/ex/jira/{self.cloud_id}"
@@ -153,9 +145,7 @@ class JiraStream(RESTStream):
         try:
             return super()._request(prepared_request, context)
         finally:
-            JiraStream._next_request_at = (
-                time.monotonic() + TIME_BETWEEN_REQUESTS_SECONDS
-            )
+            JiraStream._next_request_at = time.monotonic() + TIME_BETWEEN_REQUESTS_SECONDS
 
     @override
     def response_error_message(self, response: requests.Response) -> str:

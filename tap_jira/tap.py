@@ -90,6 +90,11 @@ class TapJira(Tap):
             description="OAuth access token, refreshed by the tap as needed",
         ),
         th.Property(
+            "expires_in",
+            th.IntegerType,
+            description="Absolute epoch expiry of the access token, written back by the tap",
+        ),
+        th.Property(
             "site_name",
             th.StringType,
             description="OAuth: name of the Jira site to sync. Defaults to the first "
