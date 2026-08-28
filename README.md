@@ -40,8 +40,6 @@ Schemas live in `tap_jira/schemas/` and are carried over unchanged from the pre-
 `expand=changelog,transitions`) yields comments, changelogs, and transitions, which are emitted to their own
 streams rather than re-fetched per issue.
 
-**Pagination.** `versions` and `components` page with `startAt` / `maxResults`; `issues` pages with
-`nextPageToken`. Other list endpoints return a single response. Requests are throttled to one every 10ms.
 
 **OAuth scopes.** `roles`, `users`, `statuses`, and `issue_priorities` need `read:jira-user` and the granular
 status/priority scopes. When the token lacks a scope, that stream is skipped with a warning instead of

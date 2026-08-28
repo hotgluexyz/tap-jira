@@ -13,7 +13,12 @@ from hotglue_singer_sdk.exceptions import FatalAPIError, RetriableAPIError
 from singer import utils
 from typing_extensions import override
 
-from tap_jira.client import JiraPagedStream, JiraStream, load_schema
+from tap_jira.client import (
+    JiraOffsetStream,
+    JiraPagedStream,
+    JiraStream,
+    load_schema,
+)
 
 
 class DependencyException(Exception):
@@ -172,10 +177,7 @@ class RolesStream(JiraStream):
     schema = load_schema("roles")
 
 
-class UsersStream(JiraStream):
-    # Single request, no paging -- matches the pre-SDK tap, which called this
-    # endpoint once via the base Stream.sync(). Paginating it would change the
-    # record set this stream has always produced; tracked separately.
+class UsersStream(JiraOffsetStream):
     name = "users"
     path = "/rest/api/2/users/search"
     primary_keys: ClassVar[list[str]] = ["accountId"]
@@ -183,27 +185,19 @@ class UsersStream(JiraStream):
     schema = load_schema("users")
 
 
-class StatusesStream(JiraStream):
-    # Single request, no paging -- matches the pre-SDK tap, which called this
-    # endpoint once via the base Stream.sync(). Paginating it would change the
-    # record set this stream has always produced; tracked separately.
+class StatusesStream(JiraPagedStream):
     name = "statuses"
     path = "/rest/api/2/statuses/search"
     primary_keys: ClassVar[list[str]] = ["id"]
     replication_key = None
-    records_jsonpath = "$.values[*]"
     schema = load_schema("statuses")
 
 
-class IssuePrioritiesStream(JiraStream):
-    # Single request, no paging -- matches the pre-SDK tap, which called this
-    # endpoint once via the base Stream.sync(). Paginating it would change the
-    # record set this stream has always produced; tracked separately.
+class IssuePrioritiesStream(JiraPagedStream):
     name = "issue_priorities"
     path = "/rest/api/2/priority/search"
     primary_keys: ClassVar[list[str]] = ["id"]
     replication_key = None
-    records_jsonpath = "$.values[*]"
     schema = load_schema("issue_priorities")
 
 
@@ -305,7 +299,10 @@ class IssuesStream(JiraStream):
         data = response.json()
         if data.get("isLast"):
             return None
-        return data.get("nextPageToken") or None
+        token = data.get("nextPageToken") or None
+        if token is not None and token == previous_token:
+            return None
+        return token
 
     @override
     def get_records(self, context: dict | None) -> Iterable[dict]:
