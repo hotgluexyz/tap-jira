@@ -64,6 +64,11 @@ plugins:
       label: Base URL
       description: Basic Auth Jira URL, e.g. https://mycompany.atlassian.net
 
+    - name: _refresh_token_via_hg_api
+      kind: boolean
+      label: Refresh Token Via Hotglue API
+      description: Fetch access tokens from the Hotglue access token endpoint instead of Atlassian
+
     - name: user_agent
       label: User Agent
       description: Value sent as the User-Agent header

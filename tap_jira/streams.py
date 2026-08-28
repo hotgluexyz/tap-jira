@@ -29,10 +29,7 @@ def validate_dependencies(tap) -> None:
         stream = tap.streams.get(name)
         return bool(stream and stream.selected)
 
-    if selected("versions") and not selected("projects"):
-        errs.append(msg_tmpl.format("Versions", "Projects"))
-    if selected("components") and not selected("projects"):
-        errs.append(msg_tmpl.format("Components", "Projects"))
+    # The issues sub-streams are written directly by IssuesStream so they do still depend on `issues` being selected.
     if not selected("issues"):
         if selected("changelogs"):
             errs.append(msg_tmpl.format("Changelog", "Issues"))
@@ -176,6 +173,9 @@ class RolesStream(JiraStream):
 
 
 class UsersStream(JiraStream):
+    # Single request, no paging -- matches the pre-SDK tap, which called this
+    # endpoint once via the base Stream.sync(). Paginating it would change the
+    # record set this stream has always produced; tracked separately.
     name = "users"
     path = "/rest/api/2/users/search"
     primary_keys: ClassVar[list[str]] = ["accountId"]
@@ -184,6 +184,9 @@ class UsersStream(JiraStream):
 
 
 class StatusesStream(JiraStream):
+    # Single request, no paging -- matches the pre-SDK tap, which called this
+    # endpoint once via the base Stream.sync(). Paginating it would change the
+    # record set this stream has always produced; tracked separately.
     name = "statuses"
     path = "/rest/api/2/statuses/search"
     primary_keys: ClassVar[list[str]] = ["id"]
@@ -193,6 +196,9 @@ class StatusesStream(JiraStream):
 
 
 class IssuePrioritiesStream(JiraStream):
+    # Single request, no paging -- matches the pre-SDK tap, which called this
+    # endpoint once via the base Stream.sync(). Paginating it would change the
+    # record set this stream has always produced; tracked separately.
     name = "issue_priorities"
     path = "/rest/api/2/priority/search"
     primary_keys: ClassVar[list[str]] = ["id"]

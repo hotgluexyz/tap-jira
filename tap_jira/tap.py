@@ -121,6 +121,12 @@ class TapJira(Tap):
             description="Basic Auth: your Jira URL, e.g. https://mycompany.atlassian.net",
         ),
         th.Property(
+            "_refresh_token_via_hg_api",
+            th.BooleanType,
+            default=False,
+            description="Fetch access tokens from the Hotglue access token endpoint ",
+        ),
+        th.Property(
             "user_agent",
             th.StringType,
             description="Value sent as the User-Agent header",

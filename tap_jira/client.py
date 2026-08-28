@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import re
 import time
-from collections.abc import Iterable
 from functools import cached_property
 from pathlib import Path
 from typing import Any
@@ -17,6 +16,9 @@ from hotglue_singer_sdk.authenticators import APIAuthenticatorBase, BasicAuthent
 from hotglue_singer_sdk.streams import RESTStream
 from typing_extensions import override
 
+# Carried over from the pre-SDK tap whose project plan specified:
+# > our past experience has shown that issuing queries no more than once every
+# > 10ms can help avoid performance issues
 TIME_BETWEEN_REQUESTS_SECONDS = 0.01
 
 DEFAULT_API_URL = "https://api.atlassian.com"
@@ -158,46 +160,6 @@ class JiraStream(RESTStream):
         if not messages:
             return default
         return f"{default}. Jira says: {messages[0]}"
-
-    def _is_scope_error(self, response: requests.Response) -> bool:
-        """Return True if the response was rejected for a missing OAuth scope."""
-        if response.status_code not in (401, 403):
-            return False
-        try:
-            message = response.json().get("message") or ""
-        except ValueError:
-            return False
-        return "scope does not match" in message.lower()
-
-    @override
-    def validate_response(self, response: requests.Response) -> None:
-        """Skip the stream when the token lacks its scope, instead of failing."""
-        if self._is_scope_error(response):
-            self.logger.warning(
-                f"Skipping unauthorized request for stream '{self.name}': the OAuth "
-                f"app lacks the scope for {response.request.path_url.split('?')[0]}. "
-                "Grant it and re-authorize to sync this data."
-            )
-            return
-        super().validate_response(response)
-
-    @override
-    def parse_response(self, response: requests.Response) -> Iterable[dict]:
-        """Yield records, or nothing when the stream was skipped."""
-        if self._is_scope_error(response):
-            return
-        yield from super().parse_response(response)
-
-    @override
-    def get_next_page_token(
-        self,
-        response: requests.Response,
-        previous_token: Any | None,
-    ) -> Any | None:
-        """Stop paging when the stream was skipped."""
-        if self._is_scope_error(response):
-            return None
-        return super().get_next_page_token(response, previous_token)
 
 
 class JiraPagedStream(JiraStream):
