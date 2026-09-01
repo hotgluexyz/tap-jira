@@ -1,13 +1,56 @@
-import json
+"""Stream type classes for tap-jira."""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+from functools import cached_property
+from typing import Any, ClassVar
+
 import pytz
-import singer
+import requests
+from hotglue_singer_sdk import Stream
+from hotglue_singer_sdk.exceptions import FatalAPIError, RetriableAPIError
+from singer import utils
+from typing_extensions import override
 
-from singer import metrics, utils, metadata, Transformer
-from .http import IssuesPaginator, Paginator,JiraNotFoundError
-from .context import Context
+from tap_jira.client import (
+    JiraOffsetStream,
+    JiraPagedStream,
+    JiraStream,
+    load_schema,
+)
 
 
-def raise_if_bookmark_cannot_advance(worklogs):
+class DependencyException(Exception):
+    """Raised when a selected stream depends on another that is not selected."""
+
+
+def validate_dependencies(tap) -> None:
+    """Fail if a stream is selected without the stream that produces its data."""
+    errs = []
+    msg_tmpl = "Unable to extract {0} data. To receive {0} data, you also need to select {1}."
+
+    def selected(name: str) -> bool:
+        stream = tap.streams.get(name)
+        return bool(stream and stream.selected)
+
+    # The issues sub-streams are written directly by IssuesStream so they do still depend on `issues` being selected.
+    if not selected("issues"):
+        if selected("changelogs"):
+            errs.append(msg_tmpl.format("Changelog", "Issues"))
+        if selected("issue_comments"):
+            errs.append(msg_tmpl.format("Issue Comments", "Issues"))
+        if selected("issue_transitions"):
+            errs.append(msg_tmpl.format("Issue Transitions", "Issues"))
+    if errs:
+        raise DependencyException(" ".join(errs))
+
+
+class WorklogsBookmarkError(Exception):
+    """Raised when the worklogs `updated` bookmark cannot safely advance."""
+
+
+def raise_if_bookmark_cannot_advance(worklogs: list[dict]) -> None:
     # Worklogs can only be queried with a `since` timestamp and
     # provides no way to page through the results. The `since`
     # timestamp has <=, not <, semantics. It also caps the response at
@@ -37,275 +80,338 @@ def raise_if_bookmark_cannot_advance(worklogs):
     # through you'll see 1000 worklogs at T2 which will fail
     # validation (because we can't tell whether there would be more
     # that should've been returned).
-    LOGGER.debug('Worklog page count: `%s`', len(worklogs))
-    worklog_updatedes = [utils.strptime_to_utc(w['updated'])
-                         for w in worklogs]
+    worklog_updatedes = [utils.strptime_to_utc(w["updated"]) for w in worklogs]
     min_updated = min(worklog_updatedes)
     max_updated = max(worklog_updatedes)
-    LOGGER.debug('Worklog min updated: `%s`', min_updated)
-    LOGGER.debug('Worklog max updated: `%s`', max_updated)
     if len(worklogs) == 1000 and min_updated == max_updated:
-        raise Exception(("Worklogs bookmark can't safely advance."
-                         "Every `updated` field is `{}`")
-                        .format(worklog_updatedes[0]))
+        raise WorklogsBookmarkError(
+            "Worklogs bookmark can't safely advance."
+            f"Every `updated` field is `{worklog_updatedes[0]}`"
+        )
 
 
-def sync_sub_streams(page):
-    for issue in page:
-        comments = issue["fields"].pop("comment")["comments"]
-        if comments and Context.is_selected(ISSUE_COMMENTS.tap_stream_id):
-            for comment in comments:
-                comment["issueId"] = issue["id"]
-            ISSUE_COMMENTS.write_page(comments)
-        changelogs = issue.pop("changelog")["histories"]
-        if changelogs and Context.is_selected(CHANGELOGS.tap_stream_id):
-            for changelog in changelogs:
-                changelog["issueId"] = issue["id"]
-            CHANGELOGS.write_page(changelogs)
-        transitions = issue.pop("transitions")
-        if transitions and Context.is_selected(ISSUE_TRANSITIONS.tap_stream_id):
-            for transition in transitions:
-                transition["issueId"] = issue["id"]
-            ISSUE_TRANSITIONS.write_page(transitions)
+class ProjectsStream(JiraStream):
+    """Stream for ``projects``."""
+
+    name = "projects"
+    path = "/rest/api/2/project"
+    primary_keys: ClassVar[list[str]] = ["id"]
+    replication_key = None
+    schema = load_schema("projects")
+
+    @override
+    def get_url_params(self, context: dict | None, next_page_token: Any | None) -> dict[str, Any]:
+        return {"expand": "description,lead,url,projectKeys,issueTypes"}
+
+    @override
+    def get_child_context(self, record: dict, context: dict | None) -> dict:
+        return {"project_id": record["id"]}
+
+    @override
+    def post_process(self, row: dict, context: dict | None = None) -> dict | None:
+        row.pop("versions", None)
+        return row
 
 
-def advance_bookmark(worklogs):
-    raise_if_bookmark_cannot_advance(worklogs)
-    new_last_updated = max(utils.strptime_to_utc(w["updated"])
-                           for w in worklogs)
-    return new_last_updated
+class VersionsStream(JiraPagedStream):
+    name = "versions"
+    path = "/rest/api/2/project/{project_id}/version"
+    primary_keys: ClassVar[list[str]] = ["id"]
+    replication_key = None
+    parent_stream_type = ProjectsStream
+    order_by = "sequence"
+    schema = load_schema("versions")
 
 
-LOGGER = singer.get_logger()
+class ComponentsStream(JiraPagedStream):
+    name = "components"
+    path = "/rest/api/2/project/{project_id}/component"
+    primary_keys: ClassVar[list[str]] = ["id"]
+    replication_key = None
+    parent_stream_type = ProjectsStream
+    schema = load_schema("components")
 
 
-class Stream():
-    """Information about and functions for syncing streams for the Jira API.
+class ProjectTypesStream(JiraStream):
+    name = "project_types"
+    path = "/rest/api/2/project/type"
+    primary_keys: ClassVar[list[str]] = ["key"]
+    replication_key = None
+    schema = load_schema("project_types")
 
-    Important class properties:
-
-    :var tap_stream_id:
-    :var pk_fields: A list of primary key fields
-    :var indirect_stream: If True, this indicates the stream cannot be synced
-    directly, but instead has its data generated via a separate stream."""
-    def __init__(self, tap_stream_id, pk_fields, indirect_stream=False, path=None):
-        self.tap_stream_id = tap_stream_id
-        self.pk_fields = pk_fields
-        # Only used to skip streams in the main sync function
-        self.indirect_stream = indirect_stream
-        self.path = path
-
-    def __repr__(self):
-        return "<Stream(" + self.tap_stream_id + ")>"
-
-    def sync(self):
-        page = Context.client.request(self.tap_stream_id, "GET", self.path)
-        self.write_page(page)
-
-    def write_page(self, page):
-        stream = Context.get_catalog_entry(self.tap_stream_id)
-        stream_metadata = metadata.to_map(stream.metadata)
-        extraction_time = singer.utils.now()
-        for rec in page:
-            with Transformer() as transformer:
-                rec = transformer.transform(rec, stream.schema.to_dict(), stream_metadata)
-            singer.write_record(self.tap_stream_id, rec, time_extracted=extraction_time)
-        with metrics.record_counter(self.tap_stream_id) as counter:
-            counter.increment(len(page))
+    @override
+    def post_process(self, row: dict, context: dict | None = None) -> dict | None:
+        row.pop("icon", None)
+        return row
 
 
-class Projects(Stream):
-    def sync(self):
-        projects = Context.client.request(
-            self.tap_stream_id, "GET", "/rest/api/2/project",
-            params={"expand": "description,lead,url,projectKeys,issueTypes"})
-        for project in projects:
-            # The Jira documentation suggests that a "versions" key may appear
-            # in the project, but from my testing that hasn't been the case
-            # (even when projects do have versions). Since we are already
-            # syncing versions separately, pop this key just in case it
-            # appears.
-            project.pop("versions", None)
-        self.write_page(projects)
-        if Context.is_selected(VERSIONS.tap_stream_id):
-            for project in projects:
-                path = "/rest/api/2/project/{}/version".format(project["id"])
-                pager = Paginator(Context.client, order_by="sequence")
-                for page in pager.pages(VERSIONS.tap_stream_id, "GET", path):
-                    VERSIONS.write_page(page)
-        if Context.is_selected(COMPONENTS.tap_stream_id):
-            for project in projects:
-                path = "/rest/api/2/project/{}/component".format(project["id"])
-                pager = Paginator(Context.client)
-                for page in pager.pages(COMPONENTS.tap_stream_id, "GET", path):
-                    COMPONENTS.write_page(page)
+class ProjectCategoriesStream(JiraStream):
+    name = "project_categories"
+    path = "/rest/api/2/projectCategory"
+    primary_keys: ClassVar[list[str]] = ["id"]
+    replication_key = None
+    schema = load_schema("project_categories")
 
 
-class ProjectTypes(Stream):
-    def sync(self):
-        path = "/rest/api/2/project/type"
-        types = Context.client.request(self.tap_stream_id, "GET", path)
-        for type_ in types:
-            type_.pop("icon")
-        self.write_page(types)
-
-class IssuePriorities(Stream):
-    def sync(self):
-        path="/rest/api/2/priority/search"
-        response = Context.client.request(self.tap_stream_id, "GET", path)
-        priorities = response["values"]
-        self.write_page(priorities)
-
-class Statuses(Stream):
-    def sync(self):
-        path="/rest/api/2/statuses/search"
-        response = Context.client.request(self.tap_stream_id, "GET", path)
-        priorities = response["values"]
-        self.write_page(priorities)
+class IssueTypesStream(JiraStream):
+    name = "issue_types"
+    path = "/rest/api/2/issuetype"
+    primary_keys: ClassVar[list[str]] = ["id"]
+    replication_key = None
+    schema = load_schema("issue_types")
 
 
-class Issues(Stream):
-
-    def sync(self):
-        updated_bookmark = [self.tap_stream_id, "updated"]
-        page_num_offset = [self.tap_stream_id, "offset", "page_num"]
-
-        last_updated = Context.update_start_date_bookmark(updated_bookmark)
-        timezone = Context.retrieve_timezone()
-        start_date = last_updated.astimezone(pytz.timezone(timezone)).strftime("%Y-%m-%d %H:%M")
-
-        jql = "updated >= '{}' order by updated asc".format(start_date)
-        params = {"fields": "*all",
-                  "expand": "changelog,transitions",
-                  "validateQuery": "strict",
-                  "jql": jql}
-        page_num = Context.bookmark(page_num_offset) or 0
-        pager = IssuesPaginator(Context.client, items_key="issues", page_num=page_num)
-        for page in pager.pages(self.tap_stream_id,
-                                "GET", "/rest/api/3/search/jql",
-                                params=params):
-            # sync comments and changelogs for each issue
-            sync_sub_streams(page)
-            for issue in page:
-                issue['fields'].pop('worklog', None)
-                # The JSON schema for the search endpoint indicates an "operations"
-                # field can be present. This field is self-referential, making it
-                # difficult to deal with - we would have to flatten the operations
-                # and just have each operation include the IDs of other operations
-                # it references. However the operations field has something to do
-                # with the UI within Jira - I believe the operations are parts of
-                # the "menu" bar for each issue. This is of questionable utility,
-                # so we decided to just strip the field out for now.
-                issue['fields'].pop('operations', None)
-
-            # Grab last_updated before transform in write_page
-            last_updated = utils.strptime_to_utc(page[-1]["fields"]["updated"])
-
-            self.write_page(page)
-
-            Context.set_bookmark(page_num_offset, pager.next_page_num)
-            singer.write_state(Context.state)
-        Context.set_bookmark(page_num_offset, None)
-        Context.set_bookmark(updated_bookmark, last_updated)
-        singer.write_state(Context.state)
+class ResolutionsStream(JiraStream):
+    name = "resolutions"
+    path = "/rest/api/2/resolution"
+    primary_keys: ClassVar[list[str]] = ["id"]
+    replication_key = None
+    schema = load_schema("resolutions")
 
 
-class Worklogs(Stream):
-    def _fetch_ids(self, last_updated):
+class RolesStream(JiraStream):
+    name = "roles"
+    path = "/rest/api/2/role"
+    primary_keys: ClassVar[list[str]] = ["id"]
+    replication_key = None
+    schema = load_schema("roles")
+
+
+class UsersStream(JiraOffsetStream):
+    name = "users"
+    path = "/rest/api/2/users/search"
+    primary_keys: ClassVar[list[str]] = ["accountId"]
+    replication_key = None
+    schema = load_schema("users")
+
+
+class StatusesStream(JiraPagedStream):
+    name = "statuses"
+    path = "/rest/api/2/statuses/search"
+    primary_keys: ClassVar[list[str]] = ["id"]
+    replication_key = None
+    schema = load_schema("statuses")
+
+
+class IssuePrioritiesStream(JiraPagedStream):
+    name = "issue_priorities"
+    path = "/rest/api/2/priority/search"
+    primary_keys: ClassVar[list[str]] = ["id"]
+    replication_key = None
+    schema = load_schema("issue_priorities")
+
+
+class IssueSubStream(Stream):
+    replication_key = None
+    _schema_emitted = False
+
+    @override
+    def get_records(self, context: dict | None) -> Iterable[dict]:
+        self._schema_emitted = True
+        return iter(())
+
+
+class IssueCommentsStream(IssueSubStream):
+    name = "issue_comments"
+    primary_keys: ClassVar[list[str]] = ["id"]
+    schema = load_schema("issue_comments")
+
+    @override
+    def post_process(self, row: dict, context: dict | None = None) -> dict | None:
+        """Coerce rich-text fields to strings, as the pre-SDK tap did."""
+        for field in ("body", "renderedBody"):
+            value = row.get(field)
+            if value is not None and not isinstance(value, str):
+                row[field] = str(value)
+        return row
+
+
+class ChangelogsStream(IssueSubStream):
+    name = "changelogs"
+    primary_keys: ClassVar[list[str]] = ["id"]
+    schema = load_schema("changelogs")
+
+
+class IssueTransitionsStream(IssueSubStream):
+    name = "issue_transitions"
+    primary_keys: ClassVar[list[str]] = ["id"]
+    schema = load_schema("issue_transitions")
+
+
+class IssuesStream(JiraStream):
+    name = "issues"
+    path = "/rest/api/3/search/jql"
+    primary_keys: ClassVar[list[str]] = ["id"]
+    replication_key = None
+    records_jsonpath = "$.issues[*]"
+    schema = load_schema("issues")
+
+    @cached_property
+    def timezone(self) -> str:
+        try:
+            response = self._request(
+                self.build_prepared_request(
+                    method="GET",
+                    url=f"{self.url_base}/rest/api/2/myself",
+                    headers=self.http_headers,
+                ),
+                None,
+            )
+            if response.status_code != 200:
+                raise RuntimeError(f"{response.status_code} from /myself")
+            return response.json()["timeZone"]
+        except (
+            FatalAPIError,
+            RetriableAPIError,
+            requests.RequestException,
+            RuntimeError,
+            KeyError,
+        ) as ex:
+            # /myself needs the read:jira-user scope, which a token scoped only to
+            # jira-work will not have. Fall back to UTC rather than failing the sync.
+            self.logger.warning(
+                f"Could not read the account timezone ({ex}); using UTC for the jql filter."
+            )
+            return "UTC"
+
+    @property
+    def starting_updated(self):
+        bookmark = self.stream_state.get("replication_key_value")
+        return utils.strptime_to_utc(bookmark or self.config["start_date"])
+
+    @override
+    def get_url_params(self, context: dict | None, next_page_token: Any | None) -> dict[str, Any]:
+        start_date = self.starting_updated.astimezone(pytz.timezone(self.timezone)).strftime(
+            "%Y-%m-%d %H:%M"
+        )
+        params: dict[str, Any] = {
+            "fields": "*all",
+            "expand": "changelog,transitions",
+            "validateQuery": "strict",
+            "jql": f"updated >= '{start_date}' order by updated asc",
+        }
+        if next_page_token:
+            params["nextPageToken"] = next_page_token
+        return params
+
+    @override
+    def get_next_page_token(self, response: Any, previous_token: Any | None) -> Any | None:
+        data = response.json()
+        if data.get("isLast"):
+            return None
+        token = data.get("nextPageToken") or None
+        if token is not None and token == previous_token:
+            return None
+        return token
+
+    @override
+    def get_records(self, context: dict | None) -> Iterable[dict]:
+        latest = None
+        for record in super().get_records(context):
+            updated = (record.get("fields") or {}).get("updated")
+            if updated:
+                latest = utils.strptime_to_utc(updated)
+            yield record
+        if latest:
+            self.stream_state["replication_key_value"] = utils.strftime(latest)
+
+    def _emit_substream(self, name: str, records: list[dict], issue_id: str) -> None:
+        if not records:
+            return
+        stream = self._tap.streams.get(name)
+        if stream is None or not stream.selected:
+            return
+        if not stream._schema_emitted:
+            stream._write_schema_message()
+            stream._schema_emitted = True
+        for record in records:
+            record["issueId"] = issue_id
+            processed = stream.post_process(record)
+            if processed is not None:
+                stream._write_record_message(processed)
+
+    @override
+    def post_process(self, row: dict, context: dict | None = None) -> dict | None:
+        fields = row.get("fields") or {}
+        self._emit_substream(
+            "issue_comments", (fields.pop("comment", None) or {}).get("comments") or [], row["id"]
+        )
+        self._emit_substream(
+            "changelogs", (row.pop("changelog", None) or {}).get("histories") or [], row["id"]
+        )
+        self._emit_substream("issue_transitions", row.pop("transitions", None) or [], row["id"])
+        fields.pop("worklog", None)
+        fields.pop("operations", None)
+        return row
+
+
+class WorklogsStream(JiraStream):
+    name = "worklogs"
+    path = "/rest/api/2/worklog/updated"
+    primary_keys: ClassVar[list[str]] = ["id"]
+    replication_key = "updated"
+    schema = load_schema("worklogs")
+
+    def _fetch_ids(self, last_updated) -> dict:
         # since_ts uses millisecond precision
         since_ts = int(last_updated.timestamp()) * 1000
-        return Context.client.request(
-            self.tap_stream_id,
-            "GET",
-            "/rest/api/2/worklog/updated",
-            params={"since": since_ts},
+        response = self._request(
+            self.build_prepared_request(
+                method="GET",
+                url=f"{self.url_base}{self.path}",
+                headers=self.http_headers,
+                params={"since": since_ts},
+            ),
+            None,
         )
+        return response.json()
 
-    def _fetch_worklogs(self, ids):
+    def _fetch_worklogs(self, ids: list) -> list[dict]:
         if not ids:
             return []
-        return Context.client.request(
-            self.tap_stream_id, "POST", "/rest/api/2/worklog/list",
-            headers={"Content-Type": "application/json"},
-            data=json.dumps({"ids": ids}),
+        response = self._request(
+            self.build_prepared_request(
+                method="POST",
+                url=f"{self.url_base}/rest/api/2/worklog/list",
+                headers={**self.http_headers, "Content-Type": "application/json"},
+                json={"ids": ids},
+            ),
+            None,
         )
+        return response.json()
 
-    def sync(self):
-        updated_bookmark = [self.tap_stream_id, "updated"]
-        last_updated = Context.update_start_date_bookmark(updated_bookmark)
+    @override
+    def get_records(self, context: dict | None) -> Iterable[dict]:
+        last_updated = self.get_starting_timestamp(context) or utils.strptime_to_utc(
+            self.config["start_date"]
+        )
         while True:
             ids_page = self._fetch_ids(last_updated)
-            if not ids_page["values"]:
+            values = ids_page.get("values") or []
+            if not values:
                 break
-            ids = [x["worklogId"] for x in ids_page["values"]]
+            ids = [x["worklogId"] for x in values]
             worklogs = self._fetch_worklogs(ids)
+            if not worklogs:
+                break
 
-            # Grab last_updated before transform in write_page
-            new_last_updated = advance_bookmark(worklogs)
+            raise_if_bookmark_cannot_advance(worklogs)
+            new_last_updated = max(utils.strptime_to_utc(w["updated"]) for w in worklogs)
 
-            self.write_page(worklogs)
+            yield from worklogs
+
+            # `since` has <= semantics, so a bookmark that does not move forward
+            # re-requests an identical page forever. Reachable when /worklog/list
+            # returns fewer records than the id page (deleted worklogs are omitted)
+            # and they all share one `updated` value, which stays below the
+            # 1000-record threshold raise_if_bookmark_cannot_advance guards.
+            if new_last_updated <= last_updated:
+                self.logger.warning(
+                    f"Worklogs bookmark did not advance past {last_updated}; "
+                    "stopping to avoid re-requesting the same page."
+                )
+                break
 
             last_updated = new_last_updated
-            Context.set_bookmark(updated_bookmark, last_updated)
-            singer.write_state(Context.state)
-            # lastPage is a boolean value based on
-            # https://developer.atlassian.com/cloud/jira/platform/rest/v3/?utm_source=%2Fcloud%2Fjira%2Fplatform%2Frest%2F&utm_medium=302#api-api-3-worklog-updated-get
-            last_page = ids_page.get("lastPage")
-            if last_page:
+            if ids_page.get("lastPage"):
                 break
-
-
-VERSIONS = Stream("versions", ["id"], indirect_stream=True)
-COMPONENTS = Stream("components", ["id"], indirect_stream=True)
-ISSUES = Issues("issues", ["id"])
-ISSUE_COMMENTS = Stream("issue_comments", ["id"], indirect_stream=True)
-ISSUE_TRANSITIONS = Stream("issue_transitions", ["id"],
-                           indirect_stream=True)
-PROJECTS = Projects("projects", ["id"])
-CHANGELOGS = Stream("changelogs", ["id"], indirect_stream=True)
-
-ALL_STREAMS = [
-    PROJECTS,
-    VERSIONS,
-    COMPONENTS,
-    ProjectTypes("project_types", ["key"]),
-    Stream("project_categories", ["id"], path="/rest/api/2/projectCategory"),
-    Stream("issue_types", ["id"], path="/rest/api/2/issuetype"),
-    Stream("resolutions", ["id"], path="/rest/api/2/resolution"),
-    Stream("roles", ["id"], path="/rest/api/2/role"),
-    Stream("users", ["accountId"], path="/rest/api/2/users/search"),
-    Statuses("statuses", ["id"]),
-    IssuePriorities("issue_priorities", ["id"]),
-    ISSUES,
-    ISSUE_COMMENTS,
-    CHANGELOGS,
-    ISSUE_TRANSITIONS,
-    Worklogs("worklogs", ["id"]),
-]
-
-ALL_STREAM_IDS = [s.tap_stream_id for s in ALL_STREAMS]
-
-
-class DependencyException(Exception):
-    pass
-
-
-def validate_dependencies():
-    errs = []
-    selected = [s.tap_stream_id for s in Context.catalog.streams
-                if Context.is_selected(s.tap_stream_id)]
-    msg_tmpl = ("Unable to extract {0} data. "
-                "To receive {0} data, you also need to select {1}.")
-    if VERSIONS.tap_stream_id in selected and PROJECTS.tap_stream_id not in selected:
-        errs.append(msg_tmpl.format("Versions", "Projects"))
-    if COMPONENTS.tap_stream_id in selected and PROJECTS.tap_stream_id not in selected:
-        errs.append(msg_tmpl.format("Components", "Projects"))
-    if ISSUES.tap_stream_id not in selected:
-        if CHANGELOGS.tap_stream_id in selected:
-            errs.append(msg_tmpl.format("Changelog", "Issues"))
-        if ISSUE_COMMENTS.tap_stream_id in selected:
-            errs.append(msg_tmpl.format("Issue Comments", "Issues"))
-        if ISSUE_TRANSITIONS.tap_stream_id in selected:
-            errs.append(msg_tmpl.format("Issue Transitions", "Issues"))
-    if errs:
-        raise DependencyException(" ".join(errs))

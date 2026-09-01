@@ -1,0 +1,56 @@
+{
+    // https://code.visualstudio.com/docs/editor/debugging
+    // Args go straight to Python, so shell redirects do not work here.
+    // Inspect output in the debug console, or redirect in the integrated terminal.
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "tap-jira discover",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "tap_jira.tap",
+            "cwd": "${workspaceFolder}/.secrets",
+            "args": [
+                "--config",
+                "config.json",
+                "--discover"
+            ],
+            "justMyCode": false,
+            "console": "integratedTerminal",
+            "python": "${workspaceFolder}/.venv/bin/python3"
+        },
+        {
+            "name": "tap-jira sync",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "tap_jira.tap",
+            "cwd": "${workspaceFolder}/.secrets",
+            "args": [
+                "--config",
+                "config.json",
+                "--state",
+                "state.json",
+                "--catalog",
+                "catalog-selected.json"
+            ],
+            "justMyCode": false,
+            "console": "integratedTerminal",
+            "python": "${workspaceFolder}/.venv/bin/python3"
+        },
+        {
+            "name": "tap-jira access-token",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "tap_jira.tap",
+            "cwd": "${workspaceFolder}/.secrets",
+            "args": [
+                "--config",
+                "config.json",
+                "--access-token"
+            ],
+            "justMyCode": false,
+            "console": "integratedTerminal",
+            "python": "${workspaceFolder}/.venv/bin/python3"
+        }
+    ]
+}
