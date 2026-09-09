@@ -34,7 +34,7 @@ A [Singer](https://www.singer.io/) tap that extracts data from **Jira**. It is b
 
 Schemas live in `tap_jira/schemas/` and are carried over unchanged from the pre-SDK tap.
 
-**Stream dependencies.** `issue_comments`, `changelogs`, and `issue_transitions` are written directly by the `issues` sync rather than fetched on their own, so they require `issues` to be selected
+**Stream dependencies.** `issue_comments`, `changelogs`, and `issue_transitions` are written directly by the `issues` sync rather than fetched on their own, so they require `issues` to be selected.
 
 **Sub-streams cost no extra requests.** A single pass over `/rest/api/3/search/jql` (with
 `expand=changelog,transitions`) yields comments, changelogs, and transitions, which are emitted to their own
